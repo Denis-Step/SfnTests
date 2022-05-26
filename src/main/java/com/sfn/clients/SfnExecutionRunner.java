@@ -7,7 +7,10 @@ import software.amazon.awssdk.services.sfn.model.GetExecutionHistoryResponse;
 import software.amazon.awssdk.services.sfn.model.HistoryEventType;
 
 import javax.inject.Inject;
+import java.sql.Time;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
@@ -16,6 +19,7 @@ import java.util.stream.Collectors;
 public class SfnExecutionRunner {
 
     private static final long DEFAULT_POLL_DELAY_MS = 1000L;
+    private static final long DEFAULT_STAGGER_MS = 500L;
 
     private static final List<HistoryEventType> TERMINAL_EXECUTION_STATE_TYPES = List.of(
             HistoryEventType.EXECUTION_ABORTED,
@@ -27,11 +31,13 @@ public class SfnExecutionRunner {
     private final StepFunctionInvoker stepFunctionInvoker;
     private final ThreadPoolExecutor threadPoolExecutor;
 
+    private volatile Instant lastApiCall;
+
     @Inject
     public SfnExecutionRunner(StepFunctionInvoker stepFunctionInvoker) {
         this.stepFunctionInvoker = stepFunctionInvoker;
         this.threadPoolExecutor = new ThreadPoolExecutor(10, 20,
-                20000L, TimeUnit.MILLISECONDS, new PriorityBlockingQueue<>());
+                20000L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
     }
 
     public void runExecutions(List<TestExecutionRequest> requests) {
@@ -52,7 +58,11 @@ public class SfnExecutionRunner {
 
     private Runnable startExecutionRunnable(TestExecutionRequest request) {
         return () -> {
+            checkTime();
+            System.out.println("Invoking SFN");
             String execArn = stepFunctionInvoker.invoke(request.payload());
+            lastApiCall = Instant.now();
+
             threadPoolExecutor.execute(pollExecutionRunnable(
                     pollExecutionRequest(execArn)));
         };
@@ -60,9 +70,13 @@ public class SfnExecutionRunner {
 
     private Runnable pollExecutionRunnable(PollExecutionRequest request) {
         return () -> {
+            checkTime();
+
             System.out.println("Polling " + request.executionArn());
             GetExecutionHistoryResponse response = stepFunctionInvoker.pollExecution(request.executionArn());
-            if (TERMINAL_EXECUTION_STATE_TYPES.contains(response.events().get(0))) {
+            lastApiCall = Instant.now();
+
+            if (TERMINAL_EXECUTION_STATE_TYPES.contains(response.events().get(0).type())) {
                 System.out.println("Finished exec: " + request.executionArn());
             } else {
                 threadPoolExecutor.execute(pollExecutionRunnable(
@@ -76,6 +90,21 @@ public class SfnExecutionRunner {
                 .executionArn(execArn)
                 .lastChecked(Instant.now())
                 .build();
+    }
+
+    private void checkTime() {
+        if (lastApiCall == null) {
+            return;
+        }
+
+        if (Instant.now().minus(DEFAULT_STAGGER_MS, ChronoUnit.MILLIS).isBefore(lastApiCall)) {
+            try {
+                Thread.sleep(DEFAULT_STAGGER_MS);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            checkTime();
+        }
     }
 
 
