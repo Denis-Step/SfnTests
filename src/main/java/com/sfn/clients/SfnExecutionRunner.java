@@ -3,17 +3,19 @@ package com.sfn.clients;
 import com.sfn.data.ImmutablePollExecutionRequest;
 import com.sfn.data.TestExecutionRequest;
 import com.sfn.data.PollExecutionRequest;
+import software.amazon.awssdk.services.sfn.model.DescribeExecutionResponse;
 import software.amazon.awssdk.services.sfn.model.GetExecutionHistoryResponse;
 import software.amazon.awssdk.services.sfn.model.HistoryEventType;
 
 import javax.inject.Inject;
-import java.sql.Time;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.time.temporal.TemporalUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class SfnExecutionRunner {
@@ -24,13 +26,14 @@ public class SfnExecutionRunner {
     private static final List<HistoryEventType> TERMINAL_EXECUTION_STATE_TYPES = List.of(
             HistoryEventType.EXECUTION_ABORTED,
             HistoryEventType.EXECUTION_FAILED,
-            HistoryEventType.EXECUTION_STARTED,
             HistoryEventType.EXECUTION_SUCCEEDED,
             HistoryEventType.EXECUTION_TIMED_OUT);
 
     private final StepFunctionInvoker stepFunctionInvoker;
     private final ThreadPoolExecutor threadPoolExecutor;
 
+    // Still subject to memory inconsistency issues with interleaved API Calls. This is expected to be fixed with a new
+    // internal API for pooling and scheduling requests.
     private volatile Instant lastApiCall;
 
     @Inject
@@ -46,49 +49,60 @@ public class SfnExecutionRunner {
                 .forEach(threadPoolExecutor::execute);
     }
 
-    private Map<String, TestExecutionRequest> createExecutionMap(List<TestExecutionRequest> testExecutionRequests) {
-        return testExecutionRequests.stream()
-        .map(t -> {
-            String execArn = stepFunctionInvoker.invoke(t.payload());
-            return Map.entry(execArn, t); })
-        .collect(Collectors.toMap(
-                Map.Entry::getKey, Map.Entry::getValue
-        ));
-    }
-
     private Runnable startExecutionRunnable(TestExecutionRequest request) {
         return () -> {
             checkTime();
             System.out.println("Invoking SFN");
             String execArn = stepFunctionInvoker.invoke(request.payload());
-            lastApiCall = Instant.now();
+
+            // Need two variables because the time of the api call needs to be used in this execution later, but might
+            // be modified by another thread before the next pollExecutionRequest is built.
+            Instant apiCallFinished = Instant.now();
+            lastApiCall = apiCallFinished;
 
             threadPoolExecutor.execute(pollExecutionRunnable(
-                    pollExecutionRequest(execArn)));
+                    pollExecutionRequest(execArn, apiCallFinished, request)));
         };
     }
 
     private Runnable pollExecutionRunnable(PollExecutionRequest request) {
         return () -> {
             checkTime();
-
             System.out.println("Polling " + request.executionArn());
             GetExecutionHistoryResponse response = stepFunctionInvoker.pollExecution(request.executionArn());
-            lastApiCall = Instant.now();
 
-            if (TERMINAL_EXECUTION_STATE_TYPES.contains(response.events().get(0).type())) {
-                System.out.println("Finished exec: " + request.executionArn());
+            // Need two variables because the time of the api call needs to be used in this execution later, but might
+            // be modified by another thread before the next pollExecutionRequest is built.
+            Instant apiCallFinished = Instant.now();
+            lastApiCall = apiCallFinished;
+
+            if (runMatcher(response, request.testExecutionRequest().matcher())) {
+                System.out.println("Matcher successful for exec: " + request.executionArn());
+                runTestFunction(response, request.testExecutionRequest().testFunction());
             } else {
-                threadPoolExecutor.execute(pollExecutionRunnable(
-                        pollExecutionRequest(request.executionArn())));
+                threadPoolExecutor.execute(pollExecutionRunnable(ImmutablePollExecutionRequest.copyOf(request)
+                        .withLastChecked(apiCallFinished)));
             }
         };
     }
 
-    private PollExecutionRequest pollExecutionRequest(String execArn) {
+    private boolean runMatcher(GetExecutionHistoryResponse historyResponse,
+                               Function<GetExecutionHistoryResponse, Boolean> matcherFunction) {
+        return matcherFunction.apply(historyResponse);
+    }
+
+    private void runTestFunction(GetExecutionHistoryResponse historyResponse,
+            BiConsumer<GetExecutionHistoryResponse, DescribeExecutionResponse> testFunction) {
+        testFunction.accept(historyResponse, null);
+    }
+
+    private PollExecutionRequest pollExecutionRequest(String execArn,
+                                                      Instant lastChecked,
+                                                      TestExecutionRequest testExecutionRequest) {
         return ImmutablePollExecutionRequest.builder()
+                .testExecutionRequest(testExecutionRequest)
                 .executionArn(execArn)
-                .lastChecked(Instant.now())
+                .lastChecked(lastChecked)
                 .build();
     }
 
@@ -105,12 +119,6 @@ public class SfnExecutionRunner {
             }
             checkTime();
         }
-    }
-
-
-    private void pollForWork() {
-
-
     }
 
 }

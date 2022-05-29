@@ -8,7 +8,9 @@ import java.time.Instant;
 @Value.Style(stagedBuilder = true)
 public interface PollExecutionRequest {
 
+    TestExecutionRequest testExecutionRequest();
     String executionArn();
     Instant lastChecked();
+
 }
 

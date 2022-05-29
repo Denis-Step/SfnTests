@@ -5,7 +5,7 @@ import org.jetbrains.annotations.Nullable;
 import software.amazon.awssdk.services.sfn.model.DescribeExecutionResponse;
 import software.amazon.awssdk.services.sfn.model.GetExecutionHistoryResponse;
 
-import java.util.function.BiFunction;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 @Value.Immutable
@@ -14,10 +14,8 @@ public interface TestExecutionRequest {
 
     String payload();
 
-    @Nullable
     Function<GetExecutionHistoryResponse, Boolean> matcher();
 
-    @Nullable
-    BiFunction<GetExecutionHistoryResponse, DescribeExecutionResponse, Void> testFunction();
+    BiConsumer<GetExecutionHistoryResponse, @Nullable DescribeExecutionResponse> testFunction();
 
 }

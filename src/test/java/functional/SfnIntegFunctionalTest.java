@@ -1,26 +1,30 @@
+package functional;
+
 import com.sfn.clients.SfnExecutionRunner;
 import com.sfn.data.ImmutableTestExecutionRequest;
 import com.sfn.data.TestExecutionRequest;
 import com.sfn.match.SfnSuccessMatcher;
 import com.sfn.poll.dagger2.DaggerMainComponent;
-import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.sfn.model.DescribeExecutionResponse;
 import software.amazon.awssdk.services.sfn.model.GetExecutionHistoryResponse;
 
 import java.util.ArrayList;
 import java.util.List;
 
-@Slf4j
-public class SfnIntegMain {
+public class SfnIntegFunctionalTest {
 
-    public static void main(String[] args) {
-        log.info("Hello");
+    private static final Logger log = LoggerFactory.getLogger(SfnIntegFunctionalTest.class);
+
+    @Test
+    public void testPlainMatcherAndTestFunction() {
         SfnExecutionRunner runner = DaggerMainComponent.create().createSfnExecutionRunner();
         runner.runExecutions(createRequests());
-
     }
 
-    private static List<TestExecutionRequest> createRequests() {
+    private List<TestExecutionRequest> createRequests() {
         List<TestExecutionRequest> requests = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
             requests.add(requestWithSfnSuccessMatcherAndTestFunction());
@@ -29,17 +33,18 @@ public class SfnIntegMain {
         return requests;
     }
 
-    private static void logResults(GetExecutionHistoryResponse historyResponse,
+    private void logResults(GetExecutionHistoryResponse historyResponse,
                             DescribeExecutionResponse describeExecutionResponse) {
-        log.info("Request succeeded with events {}",
-                historyResponse.events());
+        log.info("Request succeeded with status {} and output {}",
+                describeExecutionResponse.status(),
+                describeExecutionResponse.output());
     }
 
-    private static TestExecutionRequest requestWithSfnSuccessMatcherAndTestFunction() {
+    private TestExecutionRequest requestWithSfnSuccessMatcherAndTestFunction() {
         return ImmutableTestExecutionRequest.builder()
                 .payload(samplePayload())
                 .matcher(SfnSuccessMatcher::apply)
-                .testFunction(SfnIntegMain::logResults)
+                .testFunction(this::logResults)
                 .build();
     }
 

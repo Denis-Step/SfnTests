@@ -7,5 +7,5 @@ import dagger.Component;
         EnvModule.class,
         SfnClientModule.class})
 public interface MainComponent {
-    SfnExecutionRunner createSfnPoller();
+    SfnExecutionRunner createSfnExecutionRunner();
 }
