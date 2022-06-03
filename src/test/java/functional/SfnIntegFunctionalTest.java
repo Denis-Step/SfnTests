@@ -3,7 +3,7 @@ package functional;
 import com.sfn.clients.SfnExecutionRunner;
 import com.sfn.data.ImmutableTestExecutionRequest;
 import com.sfn.data.TestExecutionRequest;
-import com.sfn.match.SfnSuccessMatcher;
+import com.sfn.match.sfn.SfnSuccessMatcher;
 import com.sfn.poll.dagger2.DaggerMainComponent;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -43,7 +43,7 @@ public class SfnIntegFunctionalTest {
     private TestExecutionRequest requestWithSfnSuccessMatcherAndTestFunction() {
         return ImmutableTestExecutionRequest.builder()
                 .payload(samplePayload())
-                .matcher(SfnSuccessMatcher::apply)
+                .matcher(new SfnSuccessMatcher())
                 .testFunction(this::logResults)
                 .build();
     }

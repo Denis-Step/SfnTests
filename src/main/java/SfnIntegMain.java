@@ -1,7 +1,8 @@
 import com.sfn.clients.SfnExecutionRunner;
 import com.sfn.data.ImmutableTestExecutionRequest;
 import com.sfn.data.TestExecutionRequest;
-import com.sfn.match.SfnSuccessMatcher;
+import com.sfn.match.lambda.LambdaSuccessfulAtLeastOnceMatcher;
+import com.sfn.match.sfn.SfnSuccessMatcher;
 import com.sfn.poll.dagger2.DaggerMainComponent;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.sfn.model.DescribeExecutionResponse;
@@ -13,6 +14,8 @@ import java.util.List;
 @Slf4j
 public class SfnIntegMain {
 
+    private static final String RECEIVE_TX_LAMBDA_ARN = "arn:aws:lambda:us-east-2:397250182609:function:Production-MainStack-TransactionLambdasReceiveTran-bfjVrmhEQ5Jn";
+
     public static void main(String[] args) {
         log.info("Hello");
         SfnExecutionRunner runner = DaggerMainComponent.create().createSfnExecutionRunner();
@@ -22,23 +25,31 @@ public class SfnIntegMain {
 
     private static List<TestExecutionRequest> createRequests() {
         List<TestExecutionRequest> requests = new ArrayList<>();
-        for (int i = 0; i < 5; i++) {
-            requests.add(requestWithSfnSuccessMatcherAndTestFunction());
+        for (int i = 0; i < 1; i++) {
+            requests.add(requestWithLambdaSuccessMatcherAndTestFunction());
         }
 
         return requests;
     }
 
     private static void logResults(GetExecutionHistoryResponse historyResponse,
-                            DescribeExecutionResponse describeExecutionResponse) {
+                                   DescribeExecutionResponse describeExecutionResponse) {
         log.info("Request succeeded with events {}",
                 historyResponse.events());
+    }
+
+    private static TestExecutionRequest requestWithLambdaSuccessMatcherAndTestFunction() {
+        return ImmutableTestExecutionRequest.builder()
+                .payload(samplePayload())
+                .matcher(new LambdaSuccessfulAtLeastOnceMatcher(RECEIVE_TX_LAMBDA_ARN))
+                .testFunction(SfnIntegMain::logResults)
+                .build();
     }
 
     private static TestExecutionRequest requestWithSfnSuccessMatcherAndTestFunction() {
         return ImmutableTestExecutionRequest.builder()
                 .payload(samplePayload())
-                .matcher(SfnSuccessMatcher::apply)
+                .matcher(new SfnSuccessMatcher())
                 .testFunction(SfnIntegMain::logResults)
                 .build();
     }
